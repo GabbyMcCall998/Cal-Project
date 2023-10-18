@@ -2,14 +2,18 @@ const express =require("express");
 const bodyParser = require("body-parser")
 
 const mysql = require("mysql2");
-
+const passport = require("passport");
+const session = require("express-session");
+const LocalStrategy = require("passport-local").Strategy;
 const app = express();
 
-//app.use(express.static("./app/public"));
 app.use(express.static("public"));
 
-
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));  // To parse URL-encoded data in POST requests
 app.use(bodyParser.json());
+
+
 
 
    // This line creates the MySQL database connection
@@ -34,11 +38,122 @@ db.connect((err) => {
   }
 });
 
+const User = require('./models/user');
 
-app.get("/",function(req,res){
-res.sendFile(__dirname + "/index.html");
+// Configured passport for user authentication
+passport.use(new LocalStrategy(
+  (email, password, done) => {
+      User.findOne({ email: email }, (err, user) => {
+          if (err) return done(err);
+          if (!user) return done(null, false, { message: 'Incorrect email.' });
+          if (!user.validcode1(password)) return done(null, false, { message: 'Incorrect password.' });
+          return done(null, user);
+      });
+  }
+));
+
+passport.serializeUser((user, done) => {
+  done(null, user.id);
 });
-app.post("/",function(req,res){
+
+passport.deserializeUser((id, done) => {
+  User.findById(id, (err, user) => {
+      done(err, user);
+  });
+});
+
+
+// Configured Express middleware
+app.use(express.urlencoded({ extended: false }));
+app.use(session({
+    secret: 'your-secret-key',
+    resave: false,
+    saveUninitialized: false
+}));
+
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
+});
+
+app.get('/login',function(req,res){
+  res.sendFile(__dirname + "/login.html")
+});
+
+// Creating the login route
+app.post('/login', (req, res) => {
+  if (req.method === "POST") {
+    const { email, password } = req.body;
+    
+    
+    // Query to select the user with the provided email
+    const query = 'SELECT * FROM users WHERE email = ?';
+    
+    db.query(query, [email], (err, results) => {
+      if (err) {
+        console.error(err);
+        console.log("connected to")
+        return res.status(500).send('Error during login');
+      }
+      
+      if (results.length === 1) {
+        const user = results[0];
+        
+        // Compare the hashed password with the provided password
+      if (user.password === password) {
+           req.session.loggedIn = true;
+           return res.send('Logged in successfully');
+         } else {
+           return res.status(401).send('Login failed. Incorrect password.');
+         }
+       } else {
+         return res.status(401).send('Login failed. Invalid credentials.');
+       }
+     });
+   } else {
+     return res.status(405).send('Method Not Allowed');
+   }
+});
+
+   
+//Signup page route
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
+});
+
+app.post('/submit', (req, res) => {
+  if (req.method === "POST") {
+    const { name1, name2, email, password, confirmpassword } = req.body;
+
+    // Checks if any of the fields is empty
+    if (!name1 || !name2 || !email || !password || !confirmpassword) {
+      return res.status(400).send('Please fill in all fields');
+    }
+
+    // Checks if password and confirmPassword match
+    if (password !== confirmpassword) {
+      return res.status(400).send('Passwords do not match');
+    }
+        // // Hash the password using a secure hashing algorithm (e.g., bcrypt)
+        // bcrypt.hash(password, 10, (err, hash) => {
+        //   if (err) {
+        //       console.error('Password hashing error:', err);
+        //       res.send('An error occurred during sign-up.');
+        //   } else {
+        //       // Store the user data with the hashed password in memory (in a real app, store in a database)
+        //       users.push({ email, password: hash });
+        //       res.send(`Sign-up successful! Welcome, ${email}!`);
+        // const hashedPassword1 = hashPasswordFunction(password);
+        
+        // // Inserts the user data into the database
+        const sql = 'INSERT INTO users (name1,name2,email,password) VALUES (?,?,?,?)';
+        db.query(sql, [name1,name2,email,password], (err, result) => {
+            if (err) {
+                console.error('Database error:', err);
+                res.send('An error occurred during sign-up.');
+            } else {
+                res.send(`Sign-up successful! Welcome, ${name1}!`);
+            }
+      });
 
 
 
@@ -105,7 +220,7 @@ db.query('SELECT * FROM branches WHERE name = ?', [Name], (err, results) => {
 });
 });
 
-
+  
 
 //Route for updating a branch by ID
 app.put('/api/branches/:id', (req, res) => {
@@ -162,8 +277,8 @@ app.delete('/api/branches/:id', (req, res) => {
 //     });
 //   });
  
+  }
 });
-
 
 
 app.listen(3000,(err)=>{
